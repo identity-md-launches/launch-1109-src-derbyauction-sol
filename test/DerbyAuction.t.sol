@@ -558,7 +558,7 @@ contract DerbyAuctionTest is HouseKeyTest {
         assertEq(imd.balanceOf(alice), 10 ether);
         vm.revertToState(snap);
         _pay(DAY);
-        (address[] memory ranked, ) = derby.board(0, DAY);
+        (address[] memory ranked,) = derby.board(0, DAY);
         assertEq(imd.balanceOf(payer), 0.05 ether);
         assertEq(imd.balanceOf(ranked[0]), 5.97 ether);
         assertEq(imd.balanceOf(ranked[1]), 2.4875 ether);
@@ -711,6 +711,79 @@ contract DerbyAuctionTest is HouseKeyTest {
         assertEq(_state(next).bonus, 5 ether);
         assertEq(sale.carryIn(next), 2 ether);
         assertEq(sale.carry(), 0);
+    }
+
+    /// Reproduce the imported migration note using the existing behavioral fixtures.
+    /// No live state is changed, and no additional token or game is deployed.
+    function _migrationAuction() internal returns (DerbyAuction fresh) {
+        uint256 day = 20_735;
+        vm.warp(_start(day));
+        _bid(day, alice, 2 ether);
+        vm.warp(1_791_482_897); // reported v1 settlement time
+        sale.settle(day);
+        assertEq(_state(day).bonus, 2 ether);
+        assertEq(sale.carryIn(day), 0);
+        assertEq(imd.balanceOf(address(sale)), 2 ether);
+
+        address v2 = 0x53d9aA0b925c5148BCC5F98f394872687F4c831C;
+        vm.expectCall(v2, bytes(""), uint64(0));
+        fresh = new DerbyAuction(address(this), IERC20(address(imd)), ISwarmDerby(v2), address(this), 0);
+        assertEq(address(sale.derby()), address(derby));
+        assertEq(address(fresh.derby()), v2);
+        assertEq(imd.balanceOf(address(fresh)), 0);
+        assertEq(fresh.carry(), 0);
+    }
+
+    function test_migrationEmptyOldBoardParksBonusInOldCarryAndPreventsReclaim() public {
+        DerbyAuction fresh = _migrationAuction();
+        uint256 day = 20_735;
+        vm.warp(1_791_504_600); // the imported note's time is still within the theme day
+        assertFalse(derby.dayClosed(0, day));
+        vm.expectRevert(DerbyAuction.DayNotClosed.selector);
+        sale.payBonus(day);
+        _close(day);
+        assertEq(vm.getBlockTimestamp(), 1_791_590_400);
+        (address[] memory players,) = derby.board(0, day);
+        assertEq(players.length, 0);
+        vm.expectEmit(true, false, false, true, address(sale));
+        emit DerbyAuction.BonusPaid(day, new address[](0), new uint256[](0), payer, 0, 2 ether);
+        _pay(day);
+
+        assertTrue(_state(day).paid);
+        assertEq(_state(day).bonus, 0);
+        assertEq(sale.carry(), 2 ether);
+        assertEq(imd.balanceOf(address(sale)), 2 ether);
+        assertEq(imd.balanceOf(alice), 0);
+        assertEq(imd.balanceOf(payer), 0);
+        assertEq(imd.balanceOf(address(fresh)), 0);
+        assertEq(fresh.carry(), 0);
+        vm.expectRevert(DerbyAuction.WrongStatus.selector);
+        fresh.payBonus(day);
+        vm.warp(1_792_195_201);
+        vm.expectRevert(DerbyAuction.WrongStatus.selector);
+        sale.reclaim(day);
+    }
+
+    function test_migrationUnpaidOldBonusCanBeReclaimedOnlyAfterExactGraceBoundary() public {
+        DerbyAuction fresh = _migrationAuction();
+        uint256 day = 20_735;
+        assertEq(_grace(day), 1_792_195_200);
+        vm.warp(1_792_195_200);
+        vm.expectRevert(DerbyAuction.TooEarly.selector);
+        sale.reclaim(day);
+        vm.warp(1_792_195_201);
+        vm.prank(carol);
+        sale.reclaim(day);
+
+        assertEq(imd.balanceOf(alice), 2 ether);
+        assertEq(imd.balanceOf(carol), 0);
+        assertEq(imd.balanceOf(address(sale)), 0);
+        assertEq(imd.balanceOf(address(fresh)), 0);
+        assertEq(sale.carry(), 0);
+        assertEq(fresh.carry(), 0);
+        assertTrue(_state(day).paid);
+        vm.expectRevert(DerbyAuction.WrongStatus.selector);
+        sale.payBonus(day);
     }
 
     function test_failedPrizeAndRoundingDustCarryWithoutBlockingOthers() public {

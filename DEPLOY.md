@@ -3,9 +3,12 @@
 Robinhood Chain mainnet (chain id 4663) · IMD `0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127` ·
 public RPC `https://rpc.mainnet.chain.robinhood.com` · explorer `https://robinhoodchain.blockscout.com`
 
-This guide describes SwarmDerby v2: rolls use a signed house draw (`src/HouseDraw.sol`,
-`house/`). The contract live at `0xBa58BC6b5aCf8043DAEa2Bf1BF6C1c09cF84b03C` is v1. v2 is not
-deployed yet.
+The current launch deploys **only DerbyAuction**, configured for the already deployed
+SwarmDerby v2 at `0x53d9aa0b925c5148bcc5f98f394872687f4c831c` (IMD launch #1103).
+Use the **Auction** section below and the current handoff in `ADAPTATION.md`.
+The game deployment instructions are historical; do not redeploy SwarmDerby, HouseDraw
+or DerbyOdds for this auction launch. The game at
+`0xBa58BC6b5aCf8043DAEa2Bf1BF6C1c09cF84b03C` is v1.
 
 ## What's in this folder
 
@@ -90,7 +93,7 @@ rollover goes to the board's top 3 (60 / 25 / 15) after a 0.5% tip to the caller
 day with no homers pays no tip, and its whole pot rolls over. Days settle in order, each
 exactly once. `nextSettlement(league)` shows what the next call pays and whether it is ready.
 
-## 3. Deploy through IMD (`launch.open`, `evm_contracts`)
+## 3. Historical game deployment through IMD (`launch.open`, `evm_contracts`)
 
 Push this folder to a **public** GitHub repo (without `e2e/Mocks.sol` in `src/`), then pin it.
 IMD launches only a Foundry repo with `bytecode_hash = "none"` in `foundry.toml` (already set):
@@ -200,19 +203,21 @@ three lows are fixed: the reclaim grace starts no earlier than settlement, a lat
 no carry, a studio that cannot be paid is credited, and `openDay()` names a day that is still
 extended. The info items are operating notes under **Known limits**.
 
-**Live:** `0x0d81989ea1a4fdafb309ce738271d3bd659dab7b` on Robinhood Chain (IMD launch #1053,
+**Previous auction, bound to v1:** `0x0d81989ea1a4fdafb309ce738271d3bd659dab7b` on Robinhood Chain (IMD launch #1053,
 job `3bfde4f8`, block 83400203, tx `0xc99f49bb…d452ba6c`), deployed from commit `5c5c30d`
-with the arguments below; owner and studio are the owner wallet that the launch named.
+with `derby_` set to v1; owner and studio are the owner wallet that the launch named.
 Its runtime is byte-identical to a local build of `5c5c30d` with the two immutables masked.
 The launch's own audit panel found no critical, high, medium or low defect.
 
-Constructor arguments, in order:
+For the new auction, keep `src/DerbyAuction.sol` unchanged and use these constructor
+arguments in order. The confirmed new auction address comes from the deployment handoff;
+do not use the previous auction address as the v2 auction address.
 
 | Argument | Launch value |
 |---|---|
 | `owner_` | `$owner`, the actual owner supplied to the launch request |
 | `imd_` | `0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127` (Robinhood IMD) |
-| `derby_` | `0xBa58BC6b5aCf8043DAEa2Bf1BF6C1c09cF84b03C` (SwarmDerby v1). `derby` is immutable: with SwarmDerby v2, deploy DerbyAuction again with the v2 address here and in the launch body |
+| `derby_` | `0x53d9aa0b925c5148bcc5f98f394872687f4c831c` (existing SwarmDerby v2, IMD launch #1103); `derby` is immutable |
 | `studio_` | `$owner`; any nonzero address is allowed and the owner can change it later |
 | `buildFee_` | `0` |
 
@@ -234,7 +239,7 @@ Replace the repo, pinned commit, and owner placeholders with the actual launch v
 
 ```json
 {
-  "objective": "Deploy only DerbyAuction (src/DerbyAuction.sol) to Robinhood Chain after the IMD audit. Do not deploy or modify SwarmDerby or create a token, distributor or pool. Constructor arguments in order: owner_ = $owner; imd_ = 0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127; derby_ = 0xBa58BC6b5aCf8043DAEa2Bf1BF6C1c09cF84b03C; studio_ = $owner; buildFee_ = 0.",
+  "objective": "Deploy only DerbyAuction (src/DerbyAuction.sol) to Robinhood Chain. Do not deploy or change SwarmDerby, HouseDraw or DerbyOdds, and do not create a token, distributor or pool. Constructor arguments in order: owner_ = $owner; imd_ = 0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127; derby_ = 0x53d9aa0b925c5148bcc5f98f394872687f4c831c; studio_ = $owner; buildFee_ = 0. Keep DerbyAuction unchanged unless a critical or high issue is reproduced; preserve its ABI and payout math.",
   "repoUrl": "https://github.com/YOU/swarm-derby-contracts",
   "baseCommit": "COMMIT_FROM_IMPORT",
   "contracts": ["src/DerbyAuction.sol"],
@@ -244,6 +249,18 @@ Replace the repo, pinned commit, and owner placeholders with the actual launch v
   "github": true
 }
 ```
+
+**Migration of day 20735:** the old auction's settled 2 IMD bonus stays on the old
+auction and uses only the v1 arcade board. A new deployment migrates neither funds nor
+auction state. Paying an empty old board puts all 2 IMD in old carry, with no tip, and
+prevents reclaim. Only a later winning auction settled on that old contract before its
+theme day can consume the carry. Alternatively, if nobody pays the bonus first, anyone
+can reclaim it for its original bidder strictly after `1792195200` (2026-10-17 00:00:00
+UTC); the earliest valid timestamp is `1792195201`. `payBonus` remains permissionless
+after the grace period, so leaving it unpaid is not a guaranteed refund. The operator
+must coordinate the v1/v2 player transition and decide how to handle the old bonus;
+this adaptation makes no such transaction. See `ADAPTATION.md` for the reproduced audit
+note and the read-only chain snapshot.
 
 Auctions use UTC theme-day numbers. They start at 18:00 two days before the theme day and
 end at 18:00 the day before it, with repeatable five-minute anti-snipe extensions. Extensions

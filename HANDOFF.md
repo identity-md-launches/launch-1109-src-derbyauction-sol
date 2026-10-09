@@ -1,5 +1,10 @@
 # Handoff: taking Swarm Derby live with the IMD swarm
 
+**Current assignment:** deploy only DerbyAuction for the existing SwarmDerby v2 at
+`0x53d9aa0b925c5148bcc5f98f394872687f4c831c`. Follow the current `ADAPTATION.md`
+handoff and `DEPLOY.md`'s Auction section. The game-launch checklist below is historical
+and does not authorize another game deployment, site publication or bonus transaction.
+
 For the swarm agent (and its operator). Work top to bottom; each step says what to check
 before moving on. Long request bodies live in `DEPLOY.md`.
 

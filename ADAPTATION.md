@@ -1,4 +1,154 @@
-# SwarmDerby v2 launch adaptation
+# DerbyAuction launch for SwarmDerby v2
+
+This assignment prepares only `src/DerbyAuction.sol:DerbyAuction` for the
+`evm_contracts` factory on Robinhood Chain (4663). All four files in `src/`
+remain byte-identical to the supplied project. The existing constructor is
+already nonpayable, takes supported static arguments, sets the explicit owner
+and makes no external calls or dependency code checks. No critical or high
+issue was reproduced, so no source, ABI, events, errors, constants or payout
+math was changed. No transaction was broadcast.
+
+## Changes and reasons for this assignment
+
+- `test/DerbyAuctionLaunch.t.sol`: adds a CREATE2 deployment rehearsal with
+  the exact IMD and v2 derby addresses, `$owner` represented by the test caller
+  for both owner and studio, and a zero build fee. It deploys no token or game
+  fixture. It checks absent dependencies, zero dependency calls, address
+  prediction, the ownership event, constructor settings, usable owner access
+  distinct from the factory, zero ETH, runtime size and forbidden opcodes.
+  It also checks truncated arguments and nonpayable construction. This covers
+  the supplied factory requirements without changing the constructor.
+- `test/DerbyAuction.t.sol`: adds two offline regressions for imported info
+  finding `736f0635a0681c1fab7f9057091af30ed874924f1d45f1b0d5003a8fb14b3905`,
+  using the existing behavioral fixtures. They reproduce a day-20735 bonus
+  at the reported settlement time, deployment isolation, empty-board carry
+  on the old auction, rejection of reclaim after payment, and the exact
+  reclaim boundary when unpaid. No additional token or game fixture is added.
+- `DEPLOY.md`: updates the auction's constructor table and request example
+  to the approved v2 address, distinguishes the old auction from the new
+  deployment, and documents the old bonus and reclaim race. The game
+  deployment instructions are marked historical.
+- `HANDOFF.md`: directs this assignment to the auction handoff, so the
+  previous game/site launch checklist is not mistaken for this launch's scope.
+- `ADAPTATION.md`: records this assignment, the constructor handoff, audit
+  disposition and validation. The previous game's adaptation is retained below
+  as history, including its public modulus; it is not this deployment plan.
+
+No build configuration, dependencies or other application contracts were
+changed. No dependencies were installed. The manifest-writing step follows
+this adaptation: **the existing `launch.json` describes the prior SwarmDerby
+launch and must be replaced by that step**, with exactly one DerbyAuction
+entry using the arguments below. This assignment does not write `launch.json`.
+
+## Current constructor handoff
+
+Deploy only `DerbyAuction`, with zero ETH and no initialization calls. The
+ABI encoding is five static words (160 bytes), in this order:
+
+| Position | Argument | ABI type | Value |
+| --- | --- | --- | --- |
+| 1 | `owner_` | `address` | `$owner` |
+| 2 | `imd_` | `address` | `0x5F7Bb59365ce557C26dbcAa4EE9d39A4b95B7127` |
+| 3 | `derby_` | `address` | `0x53d9aa0b925c5148bcc5f98f394872687f4c831c` |
+| 4 | `studio_` | `address` | `$owner` |
+| 5 | `buildFee_` | `uint256` | `0` |
+
+Both `$owner` values resolve to the actual launch owner. No wallet address or
+key is needed by this adaptation. SwarmDerby v2 (IMD launch #1103) is an
+existing dependency, not another contract to deploy. Do not deploy HouseDraw,
+DerbyOdds, a token, distributor or pool. The website must obtain the new
+auction address from the confirmed deployment handoff.
+
+## Imported audit disposition and review
+
+**Info `736f0635…`: core behavior reproduced; two reported times corrected.**
+The immutable derby selects which arcade board gets a bonus. With an empty
+board, `payBonus` marks the auction paid and moves the whole bonus into that
+auction contract's carry. It does not migrate the funds to v2, and reclaim
+then reverts `WrongStatus`. The offline regressions confirm this and confirm
+that a fresh v2-configured auction has no claim on the old auction's funds.
+This is an operational migration note, not a code defect, so the contract
+remains unchanged. The report's two absolute time claims did not reproduce:
+
+- `1791504000 + 600` is still within theme day 20735. The empty v1 board
+  remains open then. With no commits, it closes at `(20735 + 1) * 86400 =
+  1791590400` (2026-10-10 00:00:00 UTC).
+- `(20736 * 86400) + 7 days` is **1792195200**, not the report's
+  **1792454400**. The contract rejects reclaim at the correct boundary and
+  allows it one second later if still unpaid. The first regression run caught
+  this arithmetic error in the imported note; the test and documentation were
+  corrected, with no contract change.
+
+Two scratch-only fork tests at the block below confirmed both corrected
+boundaries and both terminal outcomes against the actual deployed v1 auction,
+derby and IMD, without deploying fixtures or broadcasting. All state changes
+in those checks occurred only in Foundry's local fork. Those network-dependent
+checks are excluded from the delivered offline suite.
+
+Read-only RPC checks at Robinhood block **83,719,154**, timestamp
+**1791503980** (2026-10-08 23:59:40 UTC), confirmed the reported state:
+
+- IMD has code, reports `IMD` and 18 decimals, and reports a 2e18 balance for
+  old auction `0x0d81989ea1a4fdafb309ce738271d3bd659dab7b`.
+- The old auction's `derby()` is v1
+  `0xBa58BC6b5aCf8043DAEa2Bf1BF6C1c09cF84b03C`. Auction 20735's leader is
+  `0xD4D1aeEf7b978ab7DbC947205BAFFfde01b41018`, amount and bonus are 2e18,
+  settled is true, vetoed and paid are false, `carryIn` and `carry` are zero,
+  and `settledAt` is 1791482897. Its arcade board was empty and not closed yet.
+- The specified v2 derby has code, its `imd()` matches the supplied IMD
+  address, `nextSwingId()` was zero, and `board(0, 20735)` returned empty
+  arrays. Its `dayClosed(0, 20735)` returned false at that snapshot.
+
+These are observations at that block, not a promise about later live state.
+The operator must decide how to handle the v1 bonus during the transition.
+If paid against an empty board, it stays in old carry until a later winning
+auction on the old contract settles before its theme day. If left unpaid,
+anyone may reclaim for the original bidder only when the timestamp is
+**greater than 1792195200**; the first valid timestamp is **1792195201**
+(2026-10-17 00:00:01 UTC). This is not a guaranteed refund: permissionless
+`payBonus` and `reclaim` can race after grace. No migration or bonus transaction
+was performed, and no operator choice is needed to construct the new auction.
+
+Review covered the constructor, owner controls, bid/refund accounting,
+settlement, carry, veto, reclaim, payout rounding and external calls. Owner
+trust and accepted behavior remain: extensions stop at 19:00 UTC, fee and
+studio are read at settlement, and reclaim can race payment. IMD transfer
+availability and the immutable derby's board/closure are external
+dependencies. Time gates use `block.timestamp`, not L2 block numbers.
+
+## Current validation
+
+- `forge build`: passed using the project's unchanged configuration, Forge
+  1.8.3 and Solidity 0.8.26. Existing Forge lint warnings remain; no source
+  changes were made to silence them.
+- `forge test`: **150 passed, 0 failed, 0 skipped**, without FFI or network
+  dependencies in the delivered tests. This includes all five new tests.
+  The existing invariant campaign ran 256 sequences / 16,384 calls with zero
+  reverts; all four invariants passed. Existing fuzz tests also passed.
+- Two separate scratch-only fork tests passed against block 83,719,154,
+  confirming the deployed v1 closure, empty-board carry, reclaim rejection
+  after payment and the corrected reclaim boundary. The scratch fork test was
+  excluded before the final ordinary build/test commands above.
+- DerbyAuction runtime is **9,520 bytes**; init code with the five arguments
+  is **10,125 bytes**, within the protected limits. The CREATE2 rehearsal's
+  PUSH-aware scan found no DELEGATECALL, CALLCODE or SELFDESTRUCT.
+- Compared the local DerbyAuction runtime to live v1 and the local SwarmDerby
+  runtime to the specified live v2: both match after masking compiler-declared
+  immutable references. DerbyAuction has no external library link references.
+- Source hashes confirm all four `src/` files and `foundry.toml` are
+  unchanged. The compiled DerbyAuction ABI is identical to the baseline.
+  `launch.json` remains unchanged for the following manifest step.
+- Parsed the current `DEPLOY.md` auction request and checked its single
+  application, chain and constructor values against the brief. Diff checks
+  pass; only the five documented files changed. No Slither/Mythril, browser
+  E2E, live deployment, signing or live fund movement was performed.
+
+---
+
+# Historical: SwarmDerby v2 launch adaptation
+
+The remaining notes describe the earlier game launch, not changes made in
+this auction assignment.
 
 This adaptation prepares only `src/SwarmDerby.sol:SwarmDerby` for the
 `evm_contracts` factory. No live transaction was sent. DerbyAuction, tokens,
